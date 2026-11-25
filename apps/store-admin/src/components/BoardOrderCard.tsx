@@ -1,9 +1,9 @@
-import { useState } from 'react'
-import { StyleSheet, View } from 'react-native'
-import { acceptOrder, markOrderReady } from '@repo/firebase'
-import { formatRand, nextStatusesFor, type Order } from '@repo/types'
-import { AppText, Button, Card, Notice, Tag, theme } from '@repo/ui'
-import { boardActionError, formatWaiting, isUrgent, itemSummary, minutesSince, stageStartedAt } from '../lib/board'
+import { Pressable, StyleSheet, View } from 'react-native'
+import { Link } from 'expo-router'
+import { formatRand, type Order } from '@repo/types'
+import { AppText, Card, Tag, theme } from '@repo/ui'
+import { formatWaiting, isUrgent, itemSummary, minutesSince, stageStartedAt } from '../lib/board'
+import { CollectionPanel, OrderActions } from './OrderActions'
 
 export interface BoardOrderCardProps {
   order: Order
@@ -12,31 +12,11 @@ export interface BoardOrderCardProps {
   onDecline: (order: Order) => void
 }
 
-/**
- * One order on the board. Which buttons show comes from the shared status table
- * (`nextStatusesFor`), the same table the security rules enforce, so the app
- * never offers a move the rules would refuse.
- */
+/** One order on the board: a summary, the right buttons, and a link to the full order. */
 export function BoardOrderCard({ order, now, onDecline }: BoardOrderCardProps) {
-  const [busy, setBusy] = useState<'accept' | 'ready' | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  const moves = nextStatusesFor('store_admin', order.status)
   const urgent = isUrgent(order, now)
   const waiting = formatWaiting(minutesSince(stageStartedAt(order), now))
   const { lines, more } = itemSummary(order.items)
-
-  const run = async (action: 'accept' | 'ready') => {
-    setBusy(action)
-    setError(null)
-    try {
-      await (action === 'accept' ? acceptOrder(order) : markOrderReady(order))
-      // No need to update anything here: the live listener moves the card to its new tab.
-    } catch (e) {
-      setError(boardActionError(e))
-      setBusy(null)
-    }
-  }
 
   return (
     <Card style={urgent ? styles.urgent : undefined}>
@@ -70,47 +50,16 @@ export function BoardOrderCard({ order, now, onDecline }: BoardOrderCardProps) {
         </View>
       ) : null}
 
-      {order.status === 'ready' ? (
-        <View style={styles.collect}>
-          <AppText variant="small">Collection code: the driver shows you this</AppText>
-          <AppText variant="code" style={styles.bigCode} accessibilityLabel={`Collection code ${order.collectionCode.split('').join(' ')}`}>
-            {order.collectionCode}
-          </AppText>
-          <AppText variant="small">
-            {order.driverFirstName ? `Driver: ${order.driverFirstName}` : 'No driver assigned yet'}
-          </AppText>
-        </View>
-      ) : null}
+      {order.status === 'ready' ? <CollectionPanel order={order} /> : null}
 
-      {error ? <Notice tone="danger">{error}</Notice> : null}
+      <OrderActions order={order} onDecline={onDecline} />
 
-      {moves.includes('preparing') || moves.includes('rejected') ? (
-        <View style={styles.actions}>
-          {moves.includes('rejected') ? (
-            <Button
-              label="Decline"
-              variant="secondary"
-              fullWidth={false}
-              style={{ flex: 1 }}
-              disabled={busy !== null}
-              onPress={() => onDecline(order)}
-            />
-          ) : null}
-          {moves.includes('preparing') ? (
-            <Button
-              label="Accept"
-              fullWidth={false}
-              style={{ flex: 2 }}
-              loading={busy === 'accept'}
-              onPress={() => run('accept')}
-            />
-          ) : null}
-        </View>
-      ) : null}
-
-      {moves.includes('ready') ? (
-        <Button label="Ready for collection" loading={busy === 'ready'} onPress={() => run('ready')} />
-      ) : null}
+      {/* Link + asChild: a real link in the browser (right-click → open in new tab works). */}
+      <Link href={`/orders/${order.id}`} asChild>
+        <Pressable accessibilityRole="link" style={({ pressed }) => [styles.link, pressed && { opacity: 0.7 }]}>
+          <AppText variant="label">View full order →</AppText>
+        </Pressable>
+      </Link>
     </Card>
   )
 }
@@ -124,13 +73,5 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.md,
     backgroundColor: theme.color.surfacePage,
   },
-  collect: {
-    alignItems: 'center',
-    gap: theme.space[1],
-    padding: theme.space[4],
-    borderRadius: theme.radius.md,
-    backgroundColor: theme.color.surfacePage,
-  },
-  bigCode: { fontSize: theme.text['3xl'], letterSpacing: 8 },
-  actions: { flexDirection: 'row', gap: theme.space[3] },
+  link: { minHeight: 40, justifyContent: 'center', alignSelf: 'center', paddingHorizontal: theme.space[2] },
 })
