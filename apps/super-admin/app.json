@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "K&K Admin",
+    "slug": "kk-super-admin",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "kksuperadmin",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "bundleIdentifier": "za.co.kandk.superadmin",
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "za.co.kandk.superadmin"
+    },
+    "web": {
+      "output": "single",
+      "favicon": "./assets/images/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "experiments": {
+      "typedRoutes": false,
+      "baseUrl": "/admin"
+    },
+    "extra": {
+      "kkRole": "super_admin"
+    }
+  }
+}

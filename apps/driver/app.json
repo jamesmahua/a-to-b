@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "K&K Driver",
+    "slug": "kk-driver",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "kkdriver",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "bundleIdentifier": "za.co.kandk.driver",
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "za.co.kandk.driver"
+    },
+    "web": {
+      "output": "single",
+      "favicon": "./assets/images/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "experiments": {
+      "typedRoutes": false,
+      "baseUrl": "/driver"
+    },
+    "extra": {
+      "kkRole": "driver"
+    }
+  }
+}

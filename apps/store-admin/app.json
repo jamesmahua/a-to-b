@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "K&K Store",
+    "slug": "kk-store-admin",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "kkstoreadmin",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "bundleIdentifier": "za.co.kandk.storeadmin",
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "za.co.kandk.storeadmin"
+    },
+    "web": {
+      "output": "single",
+      "favicon": "./assets/images/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "experiments": {
+      "typedRoutes": false,
+      "baseUrl": "/store"
+    },
+    "extra": {
+      "kkRole": "store_admin"
+    }
+  }
+}

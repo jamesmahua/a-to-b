@@ -1,0 +1,31 @@
+{
+  "name": "@repo/app-shell",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@repo/firebase": "*",
+    "@repo/tokens": "*",
+    "@repo/types": "*",
+    "@repo/ui": "*"
+  },
+  "peerDependencies": {
+    "expo-router": "*",
+    "expo-status-bar": "*",
+    "react": "*",
+    "react-native": "*",
+    "react-native-safe-area-context": "*"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@repo/typescript-config": "*",
+    "@types/react": "~19.3.0",
+    "typescript": "5.9.2"
+  }
+}

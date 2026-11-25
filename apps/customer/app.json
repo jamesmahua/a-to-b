@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "Klick&Kolleka",
+    "slug": "kk-customer",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "kkcustomer",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "bundleIdentifier": "za.co.kandk.customer",
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "za.co.kandk.customer"
+    },
+    "web": {
+      "output": "single",
+      "favicon": "./assets/images/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "experiments": {
+      "typedRoutes": false,
+      "baseUrl": "/shop"
+    },
+    "extra": {
+      "kkRole": "customer"
+    }
+  }
+}

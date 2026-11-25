@@ -1,0 +1,291 @@
+rules_version = '2';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Klick&Kolleka security rules
+//
+// Data model: packages/types/src/index.ts
+// Order status table: packages/types/src/order.ts (ORDER_TRANSITIONS).
+// The transition rules below MUST match that table. Tests: tests/rules/.
+//
+// Runs on the free Spark plan (no Cloud Functions). Two things marked DEMO
+// are relaxed until order creation and payment move to Cloud Functions:
+//   1. The customer's device works out order totals (rules check the sums add up
+//      and the fees match config/pricing, but can't re-price every item).
+//   2. The customer can mark their own order as paid (demo payment button).
+// ─────────────────────────────────────────────────────────────────────────────
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function uid() {
+      return request.auth.uid;
+    }
+
+    function userPath(userId) {
+      return /databases/$(database)/documents/users/$(userId);
+    }
+
+    function me() {
+      return get(userPath(uid())).data;
+    }
+
+    function hasRole(role) {
+      return signedIn() && exists(userPath(uid())) && me().role == role;
+    }
+
+    function isSuperAdmin() {
+      return hasRole('super_admin');
+    }
+
+    function storeDoc(storeId) {
+      return get(/databases/$(database)/documents/stores/$(storeId)).data;
+    }
+
+    // The store admin who owns this store (checked via their user doc, so it
+    // also works for list queries filtered by storeId).
+    function managesStore(storeId) {
+      return hasRole('store_admin') && me().storeId == storeId;
+    }
+
+    function changedOnly(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+
+    function unchanged(key) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny([key]);
+    }
+
+    function isNonEmptyString(value, maxLen) {
+      return value is string && value.size() > 0 && value.size() <= maxLen;
+    }
+
+    function isCents(value) {
+      return value is int && value >= 0;
+    }
+
+    // ── Users ─────────────────────────────────────────────────────────────────
+
+    match /users/{userId} {
+      allow read: if signedIn() && (uid() == userId || isSuperAdmin());
+
+      // Sign-up: your own doc, a self-signup role, no store linked yet.
+      // super_admin is never self-assigned.
+      allow create: if signedIn() && uid() == userId
+        && request.resource.data.uid == userId
+        && request.resource.data.role in ['customer', 'store_admin', 'driver']
+        && request.resource.data.storeId == null
+        && isNonEmptyString(request.resource.data.displayName, 80)
+        && request.resource.data.consent.termsVersion is string
+        && request.resource.data.consent.marketingOptIn is bool;
+
+      // Own profile edits: never the role or uid. A store admin may link
+      // storeId only to a store they own.
+      allow update: if signedIn() && uid() == userId
+        && unchanged('role') && unchanged('uid')
+        && (unchanged('storeId')
+            || (resource.data.role == 'store_admin'
+                && storeDoc(request.resource.data.storeId).ownerUid == uid()));
+
+      // Super admin: approve, change roles, fix data.
+      allow create, update: if isSuperAdmin();
+      allow delete: if isSuperAdmin();
+
+      // One doc per phone/browser, for push notifications.
+      match /devices/{deviceId} {
+        allow read, write: if signedIn() && uid() == userId;
+        allow read: if isSuperAdmin();
+      }
+    }
+
+    // ── Suburbs and config: public read, super admin write ────────────────────
+
+    match /suburbs/{suburbId} {
+      allow read: if true;
+      allow write: if isSuperAdmin();
+    }
+
+    match /config/{docId} {
+      allow read: if true;
+      allow write: if isSuperAdmin();
+    }
+
+    // ── Stores ────────────────────────────────────────────────────────────────
+
+    match /stores/{storeId} {
+      // Approved stores are public (browse before logging in).
+      allow read: if resource.data.approval == 'approved'
+        || (signedIn() && resource.data.ownerUid == uid())
+        || isSuperAdmin();
+
+      // A store admin registers their store; it waits for approval.
+      allow create: if hasRole('store_admin')
+        && request.resource.data.ownerUid == uid()
+        && request.resource.data.approval == 'pending'
+        && isNonEmptyString(request.resource.data.name, 80)
+        && request.resource.data.vertical in ['food', 'retail', 'essentials', 'parcels', 'services'];
+
+      // The owner runs their store (hours, open/paused/closed, categories)
+      // but can't approve themselves or hand the store to someone else.
+      allow update: if signedIn() && resource.data.ownerUid == uid()
+        && unchanged('approval') && unchanged('ownerUid')
+        && request.resource.data.tradingStatus in ['open', 'paused', 'closed'];
+
+      allow create, update, delete: if isSuperAdmin();
+
+      // ── Products ────────────────────────────────────────────────────────────
+      match /products/{productId} {
+        allow read: if resource.data.active == true || managesStore(storeId) || isSuperAdmin();
+
+        allow create, update: if (managesStore(storeId) || isSuperAdmin())
+          && request.resource.data.storeId == storeId
+          && isNonEmptyString(request.resource.data.name, 120)
+          && isCents(request.resource.data.basePriceCents)
+          && request.resource.data.basePriceCents > 0
+          && request.resource.data.inStock is bool
+          && request.resource.data.active is bool;
+
+        // Prefer `active: false` (soft delete) so old orders still make sense.
+        allow delete: if managesStore(storeId) || isSuperAdmin();
+      }
+    }
+
+    // Product search across all stores (collection-group query).
+    match /{path=**}/products/{productId} {
+      allow read: if resource.data.active == true;
+    }
+
+    // ── Drivers ───────────────────────────────────────────────────────────────
+
+    match /drivers/{driverId} {
+      allow read: if (signedIn() && uid() == driverId) || isSuperAdmin();
+
+      // Application: starts as 'applied', unverified, offline.
+      allow create: if hasRole('driver') && uid() == driverId
+        && request.resource.data.uid == driverId
+        && request.resource.data.approval == 'applied'
+        && request.resource.data.verification.status == 'not_started'
+        && request.resource.data.availability == 'offline'
+        && request.resource.data.activeOrderId == null;
+
+      // Before approval: edit the application. After approval: go online/offline,
+      // and clear your active order once it's done.
+      // Never: approve yourself, pass your own ID check or pick your own order.
+      allow update: if signedIn() && uid() == driverId
+        && unchanged('approval') && unchanged('verification') && unchanged('uid')
+        && (unchanged('activeOrderId') || request.resource.data.activeOrderId == null)
+        && (resource.data.approval in ['applied', 'in_review']
+            || (resource.data.approval == 'approved'
+                && changedOnly(['availability', 'activeOrderId', 'updatedAt'])
+                && request.resource.data.availability in ['offline', 'available']));
+
+      allow create, update, delete: if isSuperAdmin();
+    }
+
+    // ── Orders ────────────────────────────────────────────────────────────────
+
+    match /orders/{orderId} {
+
+      function o() { return resource.data; }
+      function n() { return request.resource.data; }
+
+      function statusMove(from, to) {
+        return o().status == from && n().status == to;
+      }
+
+      // Every status change must stamp its timestamp; nothing else in
+      // `timestamps` may change.
+      function stamped(key) {
+        return n().timestamps.diff(o().timestamps).affectedKeys().hasOnly([key])
+          && n().timestamps[key] == request.time;
+      }
+
+      // DEMO: the device priced the order. Check the sums are consistent and
+      // the fees are today's fees.
+      function pricingAddsUp(p) {
+        let cfg = get(/databases/$(database)/documents/config/pricing).data;
+        return isCents(p.subtotalCents) && isCents(p.storeSubtotalCents)
+          && p.subtotalCents >= p.storeSubtotalCents
+          && p.markupCents == p.subtotalCents - p.storeSubtotalCents
+          && p.pricingVersion == cfg.version
+          && p.serviceFeeCents == cfg.serviceFeeCents
+          && p.deliveryFeeCents == cfg.deliveryFeeCents
+          && isCents(p.tipCents)
+          && p.totalCents == p.subtotalCents + p.serviceFeeCents + p.deliveryFeeCents + p.tipCents
+          && p.storePayoutCents + p.driverPayoutCents + p.platformRevenueCents == p.totalCents;
+      }
+
+      allow read: if signedIn() && (
+        o().customerUid == uid()
+        || managesStore(o().storeId)
+        || o().driverUid == uid()
+        || isSuperAdmin()
+      );
+
+      // Customer places an order with an open, approved store.
+      allow create: if hasRole('customer')
+        && n().customerUid == uid()
+        && n().status == 'awaiting_payment'
+        && n().driverUid == null
+        && n().payment.status == 'unpaid'
+        && n().rejectReason == null
+        && n().cancellation == null
+        && n().items is list && n().items.size() > 0 && n().items.size() <= 50
+        && n().itemCount is int && n().itemCount > 0
+        && n().collectionCode is string && n().collectionCode.size() == 4
+        && n().timestamps.createdAt == request.time
+        && storeDoc(n().storeId).approval == 'approved'
+        && storeDoc(n().storeId).tradingStatus == 'open'
+        && pricingAddsUp(n().pricing);
+
+      // ── Customer ──
+      allow update: if signedIn() && o().customerUid == uid() && (
+        // DEMO payment: mark own order paid.
+        (statusMove('awaiting_payment', 'pending')
+          && changedOnly(['status', 'payment', 'timestamps', 'updatedAt'])
+          && n().payment.provider == 'demo' && n().payment.status == 'paid'
+          && stamped('paidAt'))
+        // Cancel before the store accepts.
+        || ((statusMove('awaiting_payment', 'cancelled') || statusMove('pending', 'cancelled'))
+          && changedOnly(['status', 'cancellation', 'timestamps', 'updatedAt'])
+          && n().cancellation.by == 'customer'
+          && stamped('cancelledAt'))
+      );
+
+      // ── Store admin ──
+      allow update: if managesStore(o().storeId) && (
+        (statusMove('pending', 'preparing')
+          && changedOnly(['status', 'timestamps', 'updatedAt'])
+          && stamped('acceptedAt'))
+        || (statusMove('pending', 'rejected')
+          && changedOnly(['status', 'rejectReason', 'timestamps', 'updatedAt'])
+          && n().rejectReason in ['out_of_stock', 'too_busy', 'closing_soon', 'other']
+          && stamped('rejectedAt'))
+        || (statusMove('preparing', 'ready')
+          && changedOnly(['status', 'timestamps', 'updatedAt'])
+          && stamped('readyAt'))
+      );
+
+      // ── Driver (only the one assigned) ──
+      allow update: if hasRole('driver') && o().driverUid == uid() && (
+        (statusMove('ready', 'out_for_delivery')
+          && changedOnly(['status', 'timestamps', 'updatedAt'])
+          && stamped('collectedAt'))
+        || (statusMove('out_for_delivery', 'delivered')
+          && changedOnly(['status', 'timestamps', 'updatedAt'])
+          && stamped('deliveredAt'))
+      );
+
+      // ── Super admin: assign drivers, cancel, fix ──
+      allow update: if isSuperAdmin();
+
+      // Orders are never deleted (records for disputes, refunds and tax).
+      allow delete: if false;
+    }
+  }
+}

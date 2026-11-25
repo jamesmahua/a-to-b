@@ -1,159 +1,70 @@
-# Turborepo starter
+# Klick&Kolleka
 
-This Turborepo starter is maintained by the Turborepo core team.
+*Click it. Get it.* A South African marketplace for food, groceries, essentials, parcels and services.
 
-## Using this example
+Four apps, each running on **Android, iOS and in the browser** from one codebase (Expo), sharing one Firebase backend. The full spec lives in the Klick&Kolleka project (`Klick&Kolleka_Technical_Spec.md`).
 
-Run the following command:
+| App | Folder | Role | Live browser path | Local dev |
+|---|---|---|---|---|
+| Customer | `apps/customer` | `customer` | `/shop` | http://localhost:8081 |
+| Store admin | `apps/store-admin` | `store_admin` | `/store` | http://localhost:8082 |
+| Driver | `apps/driver` | `driver` | `/driver` | http://localhost:8083 |
+| Super admin | `apps/super-admin` | `super_admin` | `/admin` | http://localhost:8084 |
+| Marketing site | `apps/web` | (public) | `/` | http://localhost:3000 |
 
-```sh
-npx create-turbo@latest
+## Shared packages
+
+| Package | What it holds |
+|---|---|
+| `packages/types` | **The data model.** Every collection, field, status and the order status table. Pure TypeScript. |
+| `packages/firebase` | Firebase setup (phone + browser), login, the `AuthProvider`, typed refs and every order action. |
+| `packages/app-shell` | Login, sign-up, role guard and root layout shared by all four apps. |
+| `packages/ui` | Design-system components in React Native (render in the browser too). |
+| `packages/tokens` | Colours, spacing, type. **Change `ACTIVE_THEME` to restyle every app.** |
+| `firestore.rules` | Who can read and write what. Must match `ORDER_TRANSITIONS` in `packages/types/src/order.ts`. |
+
+## First-time setup (Windows / PowerShell)
+
+Needs **Node 24+** (`node -v`) and, for the emulators, **Java 21+** (`java -version`).
+
+```powershell
+npm install
+npm run env:sync          # copies your Firebase keys into each app (.env.local, never committed)
+npm run dev:store         # opens the store admin app in the browser
 ```
 
-## What's inside?
+On a phone: install **Expo Go**, run `npm run start -w store-admin`, and scan the QR code.
 
-This Turborepo includes the following packages/apps:
+## Local emulators (recommended for building)
 
-### Apps and Packages
+Free, offline, and you can't break real data.
 
-- `docs`: a [Next.js](https://nextjs.org/) app
-- `web`: another [Next.js](https://nextjs.org/) app
-- `@repo/ui`: a stub React component library shared by both `web` and `docs` applications
-- `@repo/eslint-config`: `eslint` configurations (includes `eslint-config-next` and `eslint-config-prettier`)
-- `@repo/typescript-config`: `tsconfig.json`s used throughout the monorepo
-
-Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
-
-### Utilities
-
-This Turborepo has some additional tools already setup for you:
-
-- [TypeScript](https://www.typescriptlang.org/) for static type checking
-- [ESLint](https://eslint.org/) for code linting
-- [Prettier](https://prettier.io) for code formatting
-
-### Build
-
-To build all apps and packages, run the following command:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo build
+```powershell
+npm run emulators         # terminal 1: Auth + Firestore + UI at http://localhost:4000
+npm run seed:emulator     # terminal 2: demo accounts, stores, products, orders
 ```
 
-Without global `turbo`, use your package manager:
+Then set `EXPO_PUBLIC_USE_EMULATORS=true` in `.env.local`, run `npm run env:sync`, and start an app.
 
-```sh
-cd my-turborepo
-npx turbo build
-yarn dlx turbo build
-pnpm exec turbo build
+**Demo logins** (password `Demo1234!`): `customer@demo.kandk.co.za`, `store@demo.kandk.co.za`, `kota@demo.kandk.co.za`, `driver@demo.kandk.co.za`, `admin@demo.kandk.co.za`.
+
+## Tests
+
+```powershell
+npm test                  # data model: pricing maths + order status table
+npm run test:rules        # security rules, against the Firestore emulator (needs Java)
 ```
 
-You can build a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
+## Deploying the rules
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
-
-```sh
-turbo build --filter=docs
+```powershell
+npx firebase login
+npm run deploy:rules      # firestore.rules + firestore.indexes.json → a-two-b
 ```
 
-Without global `turbo`:
+## Rules of the road
 
-```sh
-npx turbo build --filter=docs
-yarn exec turbo build --filter=docs
-pnpm exec turbo build --filter=docs
-```
-
-### Develop
-
-To develop all apps and packages, run the following command:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo dev
-```
-
-Without global `turbo`, use your package manager:
-
-```sh
-cd my-turborepo
-npx turbo dev
-yarn exec turbo dev
-pnpm exec turbo dev
-```
-
-You can develop a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
-
-```sh
-turbo dev --filter=web
-```
-
-Without global `turbo`:
-
-```sh
-npx turbo dev --filter=web
-yarn exec turbo dev --filter=web
-pnpm exec turbo dev --filter=web
-```
-
-### Remote Caching
-
-> [!TIP]
-> Vercel Remote Cache is free for all plans. Get started today at [vercel.com](https://vercel.com/signup?utm_source=remote-cache-sdk&utm_campaign=free_remote_cache).
-
-Turborepo can use a technique known as [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching) to share cache artifacts across machines, enabling you to share build caches with your team and CI/CD pipelines.
-
-By default, Turborepo will cache locally. To enable Remote Caching you will need an account with Vercel. If you don't have an account you can [create one](https://vercel.com/signup?utm_source=turborepo-examples), then enter the following commands:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo login
-```
-
-Without global `turbo`, use your package manager:
-
-```sh
-cd my-turborepo
-npx turbo login
-yarn exec turbo login
-pnpm exec turbo login
-```
-
-This will authenticate the Turborepo CLI with your [Vercel account](https://vercel.com/docs/concepts/personal-accounts/overview).
-
-Next, you can link your Turborepo to your Remote Cache by running the following command from the root of your Turborepo:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
-
-```sh
-turbo link
-```
-
-Without global `turbo`:
-
-```sh
-npx turbo link
-yarn exec turbo link
-pnpm exec turbo link
-```
-
-## Useful Links
-
-Learn more about the power of Turborepo:
-
-- [Tasks](https://turborepo.dev/docs/crafting-your-repository/running-tasks)
-- [Caching](https://turborepo.dev/docs/crafting-your-repository/caching)
-- [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching)
-- [Filtering](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters)
-- [Configuration Options](https://turborepo.dev/docs/reference/configuration)
-- [CLI Usage](https://turborepo.dev/docs/reference/command-line-reference)
+- Money is always **whole cents** (`basePriceCents: 2199`), shown with `formatRand()`.
+- Screens never write order docs directly: use the functions in `@repo/firebase` (`acceptOrder`, `markOrderReady`…).
+- Changing an order status rule? Change `ORDER_TRANSITIONS` **and** `firestore.rules`, then run both test suites.
+- Never commit `.env.local` or a service-account key.

@@ -1,0 +1,5 @@
+{
+  "extends": "@repo/typescript-config/react-library.json",
+  "compilerOptions": { "module": "ESNext", "moduleResolution": "Bundler", "noEmit": true, "customConditions": ["react-native"], "types": ["react-native"] },
+  "include": ["src", "../../node_modules/expo/types/**/*.d.ts"]
+}
