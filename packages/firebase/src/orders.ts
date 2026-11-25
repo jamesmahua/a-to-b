@@ -9,11 +9,11 @@ import {
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
   where,
-  writeBatch,
   type Query,
   type Unsubscribe,
   type UpdateData,
@@ -23,10 +23,12 @@ import {
   DRIVER_ASSIGNABLE_STATUSES,
   calculateOrderPricing,
   canTransition,
+  driverDispatchState,
   generateCollectionCode,
   generateOrderCode,
   getCustomerUnitPrice,
   type Address,
+  type Driver,
   type Order,
   type OrderItem,
   type OrderStatus,
@@ -192,25 +194,68 @@ export async function markOrderDelivered(order: O, driverUid: string): Promise<v
 export const cancelOrderAsAdmin = (order: O, reason: string) =>
   moveOrder(order, 'cancelled', 'super_admin', { cancellation: { by: 'super_admin', reason } })
 
-/** v1 dispatch: super admin picks the driver (spec §9). Updates the order and the driver together. */
-export async function assignDriver(
-  order: Pick<Order, 'id' | 'status' | 'driverUid'>,
-  driver: { uid: string; firstName: string },
-): Promise<void> {
-  if (!DRIVER_ASSIGNABLE_STATUSES.includes(order.status)) {
-    throw new Error(`Drivers can only be assigned while an order is ${DRIVER_ASSIGNABLE_STATUSES.join(', ')}.`)
+/** Why an assignment was refused. The super admin app turns these into plain language. */
+export type DispatchProblem = 'order_missing' | 'order_closed' | 'driver_missing' | 'driver_not_approved' | 'driver_busy' | 'driver_offline'
+
+export class DispatchError extends Error {
+  constructor(
+    readonly problem: DispatchProblem,
+    message: string,
+  ) {
+    super(message)
+    this.name = 'DispatchError'
   }
-  const batch = writeBatch(getDb())
-  batch.update(orderRef(order.id), {
-    driverUid: driver.uid,
-    driverFirstName: driver.firstName,
-    updatedAt: serverTimestamp(),
+}
+
+/**
+ * v1 dispatch: super admin picks the driver (spec §9). Updates the order, the new
+ * driver and (when reassigning) the previous driver together.
+ *
+ * Runs as a transaction: it re-reads the order and the driver at the moment of
+ * saving, so two admins (or two tabs) can't give one driver two jobs, and a
+ * driver can't be put on an order that was cancelled a second ago.
+ */
+export async function assignDriver(order: Pick<Order, 'id'>, driver: Pick<Driver, 'uid'>): Promise<void> {
+  await runTransaction(getDb(), async (tx) => {
+    // Firestore transactions need every read before the first write.
+    const orderSnap = await tx.get(orderRef(order.id))
+    if (!orderSnap.exists()) throw new DispatchError('order_missing', 'This order no longer exists.')
+    const current = orderSnap.data()
+    if (!DRIVER_ASSIGNABLE_STATUSES.includes(current.status)) {
+      throw new DispatchError('order_closed', `Drivers can only be assigned while an order is ${DRIVER_ASSIGNABLE_STATUSES.join(', ')}.`)
+    }
+    if (current.driverUid === driver.uid) return // already theirs
+
+    const driverSnap = await tx.get(driverRef(driver.uid))
+    if (!driverSnap.exists()) throw new DispatchError('driver_missing', 'This driver no longer exists.')
+    const next = driverSnap.data()
+
+    let activeStatus: OrderStatus | null = null
+    if (next.activeOrderId && next.activeOrderId !== current.id) {
+      const activeSnap = await tx.get(orderRef(next.activeOrderId))
+      activeStatus = activeSnap.exists() ? activeSnap.data().status : null
+    }
+    const state = driverDispatchState(next, activeStatus)
+    if (state !== 'free') throw new DispatchError(`driver_${state}`, `${next.firstName} can't take this job (${state}).`)
+
+    // Only free the previous driver if this order is still the job they're on.
+    const previousUid = current.driverUid
+    let freePrevious = false
+    if (previousUid) {
+      const prevSnap = await tx.get(driverRef(previousUid))
+      freePrevious = prevSnap.exists() && prevSnap.data().activeOrderId === current.id
+    }
+
+    tx.update(orderRef(current.id), {
+      driverUid: next.uid,
+      driverFirstName: next.firstName,
+      updatedAt: serverTimestamp(),
+    })
+    tx.update(driverRef(next.uid), { activeOrderId: current.id, availability: 'on_delivery', updatedAt: serverTimestamp() })
+    if (previousUid && freePrevious) {
+      tx.update(driverRef(previousUid), { activeOrderId: null, availability: 'available', updatedAt: serverTimestamp() })
+    }
   })
-  batch.update(driverRef(driver.uid), { activeOrderId: order.id, availability: 'on_delivery', updatedAt: serverTimestamp() })
-  if (order.driverUid && order.driverUid !== driver.uid) {
-    batch.update(driverRef(order.driverUid), { activeOrderId: null, availability: 'available', updatedAt: serverTimestamp() })
-  }
-  await batch.commit()
 }
 
 // ── Live lists (real-time) ────────────────────────────────────────────────────
@@ -256,9 +301,9 @@ export const watchDriverOrders = (driverUid: string, onData: Listener, onError?:
   )
 
 /** Super admin: everything in the given statuses (e.g. ready orders needing a driver). */
-export const watchOrdersByStatus = (statuses: OrderStatus[], onData: Listener, onError?: ErrorListener) =>
+export const watchOrdersByStatus = (statuses: OrderStatus[], onData: Listener, onError?: ErrorListener, max = 100) =>
   listen(
-    query(ordersCol(), where('status', 'in', statuses), orderBy('timestamps.createdAt', 'desc'), limit(100)),
+    query(ordersCol(), where('status', 'in', statuses), orderBy('timestamps.createdAt', 'desc'), limit(max)),
     onData,
     onError,
   )

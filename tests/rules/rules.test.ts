@@ -485,6 +485,17 @@ describe('drivers', () => {
     await assertFails(updateDoc(doc(as('driver'), 'drivers/driver'), { activeOrderId: 'order9' }))
   })
 
+  it('super admin lists approved drivers (dispatch); drivers can’t list each other', async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'drivers/driver'), driverDoc({ approval: 'approved' }))
+      await setDoc(doc(db, 'drivers/otherDriver'), driverDoc({ uid: 'otherDriver', approval: 'approved' }))
+    })
+    const approved = (db: Firestore) => query(collection(db, 'drivers'), where('approval', '==', 'approved'))
+    await assertSucceeds(getDocs(approved(as('admin'))))
+    await assertFails(getDocs(approved(as('driver'))))
+    await assertFails(getDocs(approved(as('storeAdmin'))))
+  })
+
   it('super admin approves drivers', async () => {
     await seed(async (db) => setDoc(doc(db, 'drivers/driver'), driverDoc()))
     await assertSucceeds(updateDoc(doc(as('admin'), 'drivers/driver'), { approval: 'approved' }))

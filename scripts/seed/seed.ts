@@ -1,5 +1,5 @@
 /**
- * Fills Firestore + Auth with demo data: four accounts (one per role), two stores,
+ * Fills Firestore + Auth with demo data: seven accounts (every role, three drivers), two stores,
  * ~37 products, suburbs, pricing, and orders in every status for the store board.
  *
  *   Local emulators (safe, free):   npm run emulators      (one terminal)
@@ -61,6 +61,8 @@ const ACCOUNTS: Account[] = [
   { key: 'storeAdmin', role: 'store_admin', email: 'store@demo.kandk.co.za', displayName: 'Demo StoreAdmin', phone: '0820000002', suburb: 'Benoni Central', storeId: SPAZA.id },
   { key: 'kotaAdmin', role: 'store_admin', email: 'kota@demo.kandk.co.za', displayName: 'Demo KotaAdmin', phone: '0820000005', suburb: 'Wattville', storeId: KOTA.id },
   { key: 'driver', role: 'driver', email: 'driver@demo.kandk.co.za', displayName: 'Demo Driver', phone: '0820000003', suburb: 'Benoni Central', storeId: null },
+  { key: 'driver2', role: 'driver', email: 'driver2@demo.kandk.co.za', displayName: 'Thandi Driver', phone: '0820000006', suburb: 'Northmead', storeId: null },
+  { key: 'driver3', role: 'driver', email: 'driver3@demo.kandk.co.za', displayName: 'Kagiso Driver', phone: '0820000007', suburb: 'Wattville', storeId: null },
   {
     key: 'superAdmin',
     role: 'super_admin',
@@ -154,7 +156,7 @@ async function seedOrders(customerUid: string, driverUid: string) {
     { id: 'demo-order-1', code: 'KK-4821', status: 'pending', ageMin: 2, items: [['Albany', 2], ['Clover Full Cream', 1], ['Large Eggs', 1]], note: 'Please check the eggs aren’t cracked' },
     { id: 'demo-order-2', code: 'KK-4822', status: 'pending', ageMin: 6, items: [['Coca-Cola', 1], ['Simba', 2]] },
     { id: 'demo-order-3', code: 'KK-4817', status: 'preparing', ageMin: 14, items: [['Iwisa', 1], ['Lucky Star', 2], ['Sunfoil', 1]] },
-    { id: 'demo-order-4', code: 'KK-4810', status: 'ready', ageMin: 25, items: [['Joko', 1], ['Selati', 1]], driver: true },
+    { id: 'demo-order-4', code: 'KK-4810', status: 'ready', ageMin: 25, items: [['Joko', 1], ['Selati', 1]] }, // no driver yet: dispatch shows it red
     { id: 'demo-order-5', code: 'KK-4802', status: 'out_for_delivery', ageMin: 40, items: [['Household Candles', 2], ['Twinsaver', 1]], driver: true },
     { id: 'demo-order-6', code: 'KK-4790', status: 'delivered', ageMin: 180, items: [['Sasko', 1], ['Rama', 1], ['Clover Amasi', 1]], driver: true },
     { id: 'demo-order-7', code: 'KK-4788', status: 'rejected', ageMin: 240, items: [['Lion Matches', 3]] },
@@ -235,24 +237,36 @@ async function main() {
   await seedStore(KOTA, uids.kotaAdmin!)
   console.log(`✔ 2 stores, ${SPAZA.products.length + KOTA.products.length} products`)
 
-  await db.doc(`drivers/${uids.driver}`).set({
-    uid: uids.driver,
-    displayName: 'Demo Driver',
-    firstName: 'Demo',
-    phone: '0820000003',
-    verificationPath: 'sa_id',
-    permitType: null,
-    verification: { status: 'passed', provider: 'demo', reference: 'DEMO-VERIFY', checkedAt: now },
-    approval: 'approved',
-    approvalNote: null,
-    availability: 'on_delivery',
-    vehicle: { type: 'motorbike', registration: 'ND 123-456 GP' },
-    operatingSuburbIds: SPAZA.deliversTo.map(slug),
-    activeOrderId: 'demo-order-5',
-    createdAt: now,
-    updatedAt: now,
-  })
-  console.log('✔ approved driver')
+  // Three approved drivers, so dispatch has a real choice:
+  //   driver@  (Demo)   on the way with KK-4802 → busy
+  //   driver2@ (Thandi) online, no job           → free, covers Northmead
+  //   driver3@ (Kagiso) offline                  → hidden unless you show offline drivers
+  const drivers = [
+    { key: 'driver', availability: 'on_delivery', activeOrderId: 'demo-order-5', vehicle: { type: 'motorbike', registration: 'ND 123-456 GP' }, areas: SPAZA.deliversTo },
+    { key: 'driver2', availability: 'available', activeOrderId: null, vehicle: { type: 'scooter', registration: 'HT 22 KL GP' }, areas: ['Northmead', 'Benoni Central'] },
+    { key: 'driver3', availability: 'offline', activeOrderId: null, vehicle: { type: 'car', registration: 'BB 45 ZZ GP' }, areas: KOTA.deliversTo },
+  ] as const
+  for (const d of drivers) {
+    const a = ACCOUNTS.find((x) => x.key === d.key)!
+    await db.doc(`drivers/${uids[d.key]}`).set({
+      uid: uids[d.key],
+      displayName: a.displayName,
+      firstName: a.displayName.split(' ')[0],
+      phone: a.phone,
+      verificationPath: 'sa_id',
+      permitType: null,
+      verification: { status: 'passed', provider: 'demo', reference: 'DEMO-VERIFY', checkedAt: now },
+      approval: 'approved',
+      approvalNote: null,
+      availability: d.availability,
+      vehicle: d.vehicle,
+      operatingSuburbIds: d.areas.map(slug),
+      activeOrderId: d.activeOrderId,
+      createdAt: now,
+      updatedAt: now,
+    })
+  }
+  console.log(`✔ ${drivers.length} approved drivers`)
 
   await seedOrders(uids.customer!, uids.driver!)
   console.log('✔ 8 orders (one in every status)')

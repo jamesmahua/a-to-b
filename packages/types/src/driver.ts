@@ -1,4 +1,5 @@
 import type { TimestampLike } from './common'
+import { TERMINAL_STATUSES, type OrderStatus } from './order'
 
 /** Has K&K approved this driver? Only super admin moves past `in_review`. */
 export const DRIVER_APPROVALS = ['applied', 'in_review', 'approved', 'rejected', 'suspended'] as const
@@ -60,4 +61,24 @@ export interface Driver {
   activeOrderId: string | null
   createdAt: TimestampLike
   updatedAt: TimestampLike
+}
+
+/**
+ * Can super admin give this driver a job right now? (v1: one job per driver.)
+ *
+ * `activeOrderStatus` is the status of the driver's `activeOrderId` order, or
+ * `null` if they have none or it can't be found. A driver whose last order has
+ * ended (delivered, cancelled, rejected) counts as free, even if their doc still
+ * points at it, e.g. the customer cancelled before the driver collected.
+ */
+export type DriverDispatchState = 'free' | 'busy' | 'offline' | 'not_approved'
+
+export function driverDispatchState(
+  driver: Pick<Driver, 'approval' | 'availability' | 'activeOrderId'>,
+  activeOrderStatus: OrderStatus | null,
+): DriverDispatchState {
+  if (driver.approval !== 'approved') return 'not_approved'
+  if (driver.activeOrderId && activeOrderStatus && !TERMINAL_STATUSES.includes(activeOrderStatus)) return 'busy'
+  if (driver.availability === 'offline') return 'offline'
+  return 'free'
 }
