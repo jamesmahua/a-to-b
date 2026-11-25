@@ -1,14 +1,17 @@
 import { useState } from 'react'
 import { Platform } from 'react-native'
-import { Link, useRouter } from 'expo-router'
+import { Link, useLocalSearchParams, useRouter } from 'expo-router'
 import { ROLE_APPS } from '@repo/types'
 import { friendlyAuthError, sendPasswordReset, signInWithEmail, signInWithGoogle, useAuth } from '@repo/firebase'
+import { safeNextPath, withNext } from './RequireRole'
 import { AppText, Button, Card, Notice, Screen, Stack, TextField } from '@repo/ui'
 
 /** The same login screen in all four apps. Each app's role decides the title. */
 export function LoginScreen() {
   const { appRole } = useAuth()
   const router = useRouter()
+  const { next } = useLocalSearchParams<{ next?: string }>()
+  const afterLogin = safeNextPath(next)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -27,7 +30,7 @@ export function LoginScreen() {
     setBusy(true)
     try {
       await signInWithEmail(email, password)
-      router.replace('/')
+      router.replace(afterLogin)
     } catch (e) {
       setError(friendlyAuthError(e))
     } finally {
@@ -40,7 +43,7 @@ export function LoginScreen() {
     try {
       // Login only: new Google users go through sign-up, where they accept the terms.
       await signInWithGoogle(appRole === 'super_admin' ? 'customer' : appRole, { acceptedTerms: false, marketingOptIn: false })
-      router.replace('/')
+      router.replace(afterLogin)
     } catch (e) {
       setError(
         (e as { code?: string }).code === 'terms-required'
@@ -104,7 +107,7 @@ export function LoginScreen() {
       {canSignUp ? (
         <AppText variant="small" center>
           New here?{' '}
-          <Link href="/register" style={{ fontWeight: '700', textDecorationLine: 'underline' }}>
+          <Link href={withNext('/register', afterLogin)} style={{ fontWeight: '700', textDecorationLine: 'underline' }}>
             Create an account
           </Link>
         </AppText>

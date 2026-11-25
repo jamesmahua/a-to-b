@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { Link, useRouter } from 'expo-router'
+import { Link, useLocalSearchParams, useRouter } from 'expo-router'
 import { ROLE_APPS, ROLE_LABELS } from '@repo/types'
 import { friendlyAuthError, useAuth } from '@repo/firebase'
+import { safeNextPath, withNext } from './RequireRole'
 import { AppText, Button, Card, Checkbox, Notice, Screen, Stack, TextField } from '@repo/ui'
 
 /**
@@ -11,6 +12,8 @@ import { AppText, Button, Card, Checkbox, Notice, Screen, Stack, TextField } fro
 export function RegisterScreen() {
   const { appRole, signUp } = useAuth()
   const router = useRouter()
+  const { next } = useLocalSearchParams<{ next?: string }>()
+  const afterLogin = safeNextPath(next)
   const [displayName, setDisplayName] = useState('')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
@@ -25,7 +28,7 @@ export function RegisterScreen() {
     return (
       <Screen centered maxWidth={420}>
         <Notice>Super admin accounts are set up by another super admin.</Notice>
-        <Link href="/login">Back to log in</Link>
+        <Link href={withNext('/login', afterLogin)}>Back to log in</Link>
       </Screen>
     )
   }
@@ -47,7 +50,7 @@ export function RegisterScreen() {
         acceptedTerms,
         marketingOptIn,
       })
-      router.replace('/')
+      router.replace(afterLogin)
     } catch (e) {
       setError(friendlyAuthError(e))
     } finally {
@@ -106,7 +109,7 @@ export function RegisterScreen() {
 
       <AppText variant="small" center>
         Already have an account?{' '}
-        <Link href="/login" style={{ fontWeight: '700', textDecorationLine: 'underline' }}>
+        <Link href={withNext('/login', afterLogin)} style={{ fontWeight: '700', textDecorationLine: 'underline' }}>
           Log in
         </Link>
       </AppText>

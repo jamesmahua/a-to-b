@@ -1,6 +1,6 @@
 import { useEffect, type ReactNode } from 'react'
 import { ActivityIndicator, Platform, View } from 'react-native'
-import { Redirect } from 'expo-router'
+import { Redirect, usePathname } from 'expo-router'
 import { ROLE_APPS, ROLE_LABELS, type Role } from '@repo/types'
 import { signOut, useAuth } from '@repo/firebase'
 import { AppText, Button, Card, Notice, Screen, theme } from '@repo/ui'
@@ -11,12 +11,30 @@ import { AppText, Button, Card, Notice, Screen, theme } from '@repo/ui'
  */
 export function RequireRole({ children }: { children: ReactNode }) {
   const { access, profile, appRole, correctWebPath } = useAuth()
+  const pathname = usePathname()
 
   if (access === 'loading') return <FullScreenSpinner />
-  if (access === 'signed_out') return <Redirect href="/login" />
+  // `next` brings them back here after logging in (e.g. to checkout).
+  if (access === 'signed_out') {
+    return <Redirect href={withNext('/login', pathname || '/')} />
+  }
   if (access === 'no_profile') return <MissingProfile />
   if (access === 'wrong_app' && profile) return <WrongApp appRole={appRole} userRole={profile.role} webPath={correctWebPath} />
   return <>{children}</>
+}
+
+/**
+ * Where to go after logging in or signing up. Only accepts paths inside this
+ * app ("/checkout"), never full URLs, so a link can't bounce someone to another site.
+ */
+export function safeNextPath(next: string | string[] | undefined): string {
+  const value = Array.isArray(next) ? next[0] : next
+  return value && value.startsWith('/') && !value.startsWith('//') ? value : '/'
+}
+
+/** Keeps `next` when moving between log in and sign up. */
+export function withNext(path: string, next: string): string {
+  return next === '/' ? path : `${path}?next=${encodeURIComponent(next)}`
 }
 
 export function FullScreenSpinner() {

@@ -5,5 +5,5 @@
 export { RootLayout } from './RootLayout'
 export { LoginScreen } from './LoginScreen'
 export { RegisterScreen } from './RegisterScreen'
-export { RequireRole, FullScreenSpinner, webUrlForRole } from './RequireRole'
+export { RequireRole, FullScreenSpinner, webUrlForRole, safeNextPath, withNext } from './RequireRole'
 export { HomePlaceholder } from './HomePlaceholder'
