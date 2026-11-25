@@ -1,13 +1,13 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { ActivityIndicator, View } from 'react-native'
 import { useLocalSearchParams } from 'expo-router'
-import { watchOrder } from '@repo/firebase'
+import { cancelOrderAsCustomer, watchOrder } from '@repo/firebase'
 import { formatRand, type Order } from '@repo/types'
-import { AppText, Card, Notice, Screen, Stack, theme } from '@repo/ui'
+import { AppText, Button, Card, Notice, Screen, Sheet, Stack, theme } from '@repo/ui'
 import { Row } from '../../../components/StoreOrderCard'
 import { TopBar } from '../../../components/TopBar'
 import { TrackingTimeline } from '../../../components/TrackingTimeline'
-import { getTracking } from '../../../lib/tracking'
+import { customerCanCancel, getTracking } from '../../../lib/tracking'
 
 /**
  * Tracking for one order, live. URL: /track/<orderId>
@@ -21,6 +21,10 @@ export default function TrackOrder() {
   // undefined = still loading · null = not found (or not theirs) · Order = loaded
   const [order, setOrder] = useState<Order | null | undefined>(undefined)
   const [error, setError] = useState<string | null>(null)
+  // Cancel flow: confirm sheet open? request in flight? error from Firestore?
+  const [confirming, setConfirming] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
+  const [cancelError, setCancelError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!orderId) return
@@ -53,6 +57,22 @@ export default function TrackOrder() {
   }
 
   const tracking = getTracking(order)
+  const canCancel = customerCanCancel(order.status)
+
+  async function handleCancel() {
+    if (!order) return
+    setCancelling(true)
+    setCancelError(null)
+    try {
+      await cancelOrderAsCustomer(order, 'Cancelled by customer')
+      setConfirming(false) // the live listener redraws the page as "Order cancelled"
+    } catch {
+      // Most likely the store accepted it a moment ago: the rules no longer allow the customer to cancel.
+      setCancelError('We couldn’t cancel this order. The store may have just accepted it. Check the status above.')
+    } finally {
+      setCancelling(false)
+    }
+  }
 
   return (
     <Shell title={order.code}>
@@ -93,6 +113,30 @@ export default function TrackOrder() {
         </AppText>
         {order.deliveryInstructions ? <AppText variant="small">Note: {order.deliveryInstructions}</AppText> : null}
       </Card>
+
+      {/* Only while the store hasn't accepted. Same rule as firestore.rules (ORDER_TRANSITIONS). */}
+      {canCancel ? <Button label="Cancel order" variant="ghost" onPress={() => setConfirming(true)} /> : null}
+
+      {/* A sheet instead of a browser confirm() popup: looks the same on phone and web, and is accessible. */}
+      <Sheet
+        visible={confirming}
+        onClose={() => setConfirming(false)}
+        title="Cancel this order?"
+        footer={
+          <Stack gap={2}>
+            <Button label="Yes, cancel it" variant="danger" onPress={handleCancel} loading={cancelling} />
+            <Button label="Keep my order" variant="ghost" onPress={() => setConfirming(false)} />
+          </Stack>
+        }
+      >
+        <AppText>
+          {order.storeName} hasn’t started on it yet, so you can still cancel {order.code}.
+        </AppText>
+        {order.payment.provider === 'demo' ? (
+          <AppText variant="small">Demo payment: no money was taken, so there’s nothing to refund.</AppText>
+        ) : null}
+        {cancelError ? <Notice tone="danger">{cancelError}</Notice> : null}
+      </Sheet>
     </Shell>
   )
 }

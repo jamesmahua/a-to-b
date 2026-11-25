@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Order, OrderTimestamps, TimestampLike } from '@repo/types'
-import { getTracking } from './tracking'
+import { customerCanCancel, getTracking } from './tracking'
 
 /** A fake Firestore timestamp for tests. */
 const at = (iso: string): TimestampLike => {
@@ -39,6 +39,8 @@ describe('getTracking', () => {
     expect(t.headline).toBe('Waiting for Kasi Kota Corner to accept')
     expect(t.steps.map((s) => s.state)).toEqual(['done', 'current', 'upcoming', 'upcoming', 'upcoming'])
     expect(t.steps[0]!.at?.toISOString()).toBe('2026-11-25T18:01:00.000Z')
+    // The current step says what's happening, not what has happened
+    expect(t.steps.map((s) => s.label)).toEqual(['Order placed', 'Waiting for the store', 'Packed and ready', 'Collected by the driver', 'Delivered'])
     expect(t.finished).toBe(false)
   })
 
@@ -71,5 +73,15 @@ describe('getTracking', () => {
     )
     expect(t.steps.map((s) => s.state)).toEqual(['done', 'done', 'skipped', 'skipped', 'skipped'])
     expect(t.detail).toBe('Klick&Kolleka cancelled this order.')
+  })
+})
+
+describe('customerCanCancel', () => {
+  it('only before the store accepts', () => {
+    expect(customerCanCancel('awaiting_payment')).toBe(true)
+    expect(customerCanCancel('pending')).toBe(true)
+    expect(customerCanCancel('preparing')).toBe(false)
+    expect(customerCanCancel('delivered')).toBe(false)
+    expect(customerCanCancel('cancelled')).toBe(false)
   })
 })

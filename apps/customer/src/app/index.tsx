@@ -46,7 +46,10 @@ export default function Home() {
           <>
             <TopBarButton label="Search" onPress={() => router.push('/search')} />
             {signedIn ? (
-              <TopBarButton label="Log out" onPress={() => signOut()} />
+              <>
+                <TopBarButton label="My orders" onPress={() => router.push('/orders')} />
+                <TopBarButton label="Log out" onPress={() => signOut()} />
+              </>
             ) : (
               <TopBarButton label="Log in" onPress={() => router.push('/login')} />
             )}

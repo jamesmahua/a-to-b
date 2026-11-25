@@ -4,7 +4,7 @@
  * Why keep this out of the screen? The screen only has to draw what this returns,
  * and every status can be tested here without Firebase or a phone.
  */
-import { REJECT_REASON_LABELS, type Order, type OrderStatus, type OrderTimestamps } from '@repo/types'
+import { REJECT_REASON_LABELS, nextStatusesFor, type Order, type OrderStatus, type OrderTimestamps } from '@repo/types'
 
 /** done = happened · current = happening now · upcoming = still to come · skipped = won't happen (order ended) */
 export type StepState = 'done' | 'current' | 'upcoming' | 'skipped'
@@ -29,14 +29,37 @@ export interface Tracking {
   problem: boolean
 }
 
-/** The five milestones, in order, and the timestamp that marks each one. */
-const MILESTONES: { key: TrackingStep['key']; label: string; stamp: keyof OrderTimestamps }[] = [
-  { key: 'paid', label: 'Order placed', stamp: 'paidAt' },
-  { key: 'accepted', label: 'Store accepted', stamp: 'acceptedAt' },
-  { key: 'ready', label: 'Packed and ready', stamp: 'readyAt' },
-  { key: 'collected', label: 'On the way', stamp: 'collectedAt' },
-  { key: 'delivered', label: 'Delivered', stamp: 'deliveredAt' },
+/**
+ * The five milestones, in order. Each has two labels: `label` once it has happened,
+ * `now` while it's the current step, so the timeline never claims something happened early.
+ */
+const MILESTONES: { key: TrackingStep['key']; label: string; now: string; stamp: keyof OrderTimestamps }[] = [
+  { key: 'paid', label: 'Order placed', now: 'Waiting for payment', stamp: 'paidAt' },
+  { key: 'accepted', label: 'Store accepted', now: 'Waiting for the store', stamp: 'acceptedAt' },
+  { key: 'ready', label: 'Packed and ready', now: 'Being prepared', stamp: 'readyAt' },
+  { key: 'collected', label: 'Collected by the driver', now: 'Waiting for the driver', stamp: 'collectedAt' },
+  { key: 'delivered', label: 'Delivered', now: 'On the way to you', stamp: 'deliveredAt' },
 ]
+
+/**
+ * Short status words for the customer (tags on order cards).
+ * The shared ORDER_STATUS_LABELS in @repo/types are worded for the store ("New order").
+ */
+export const CUSTOMER_STATUS_LABELS: Record<OrderStatus, string> = {
+  awaiting_payment: 'Not paid',
+  pending: 'Waiting for store',
+  preparing: 'Preparing',
+  ready: 'Waiting for driver',
+  out_for_delivery: 'On the way',
+  delivered: 'Delivered',
+  rejected: 'Declined',
+  cancelled: 'Cancelled',
+}
+
+/** True while the customer may still cancel: same transition table the security rules use. */
+export function customerCanCancel(status: OrderStatus): boolean {
+  return nextStatusesFor('customer', status).includes('cancelled')
+}
 
 /** How many milestones each status has completed. */
 const DONE_COUNT: Record<OrderStatus, number> = {
@@ -65,7 +88,7 @@ export function getTracking(order: Pick<Order, 'status' | 'storeName' | 'driverF
     else if (i === doneCount) state = 'current'
     else state = 'upcoming'
     const stamp = timestamps[m.stamp]
-    return { key: m.key, label: m.label, state, at: stamp ? stamp.toDate() : null }
+    return { key: m.key, label: state === 'current' ? m.now : m.label, state, at: stamp ? stamp.toDate() : null }
   })
 
   const driver = order.driverFirstName ?? 'Your driver'
