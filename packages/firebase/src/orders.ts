@@ -14,6 +14,7 @@ import {
   setDoc,
   updateDoc,
   where,
+  writeBatch,
   type Query,
   type Unsubscribe,
   type UpdateData,
@@ -158,13 +159,23 @@ async function moveOrder(
   role: Role,
   extra: UpdateData<Order> = {},
 ): Promise<void> {
+  await updateDoc(orderRef(order.id), statusUpdate(order, to, role, extra))
+}
+
+/** The fields a status move writes: new status, its timestamp, `updatedAt`. Throws if the role may not make the move. */
+function statusUpdate(
+  order: Pick<Order, 'status'>,
+  to: OrderStatus,
+  role: Role,
+  extra: UpdateData<Order> = {},
+): UpdateData<Order> {
   if (!canTransition(role, order.status, to)) throw new OrderTransitionError(role, order.status, to)
-  await updateDoc(orderRef(order.id), {
+  return {
     ...extra,
     status: to,
     [`timestamps.${STATUS_TIMESTAMP_KEY[to]}`]: serverTimestamp(),
     updatedAt: serverTimestamp(),
-  } as UpdateData<Order>)
+  } as UpdateData<Order>
 }
 
 type O = Pick<Order, 'id' | 'status'>
@@ -184,10 +195,16 @@ export const markOrderReady = (order: O) => moveOrder(order, 'ready', 'store_adm
 
 // Driver
 export const markOrderCollected = (order: O) => moveOrder(order, 'out_for_delivery', 'driver')
-/** Marks delivered and frees the driver for the next job. */
+/**
+ * Marks delivered and frees the driver for the next job, in one batch: either
+ * both happen or neither does, so a dropped connection can't leave the order
+ * delivered while the driver still looks busy.
+ */
 export async function markOrderDelivered(order: O, driverUid: string): Promise<void> {
-  await moveOrder(order, 'delivered', 'driver')
-  await updateDoc(driverRef(driverUid), { activeOrderId: null, availability: 'available', updatedAt: serverTimestamp() })
+  const batch = writeBatch(getDb())
+  batch.update(orderRef(order.id), statusUpdate(order, 'delivered', 'driver'))
+  batch.update(driverRef(driverUid), { activeOrderId: null, availability: 'available', updatedAt: serverTimestamp() })
+  await batch.commit()
 }
 
 // Super admin

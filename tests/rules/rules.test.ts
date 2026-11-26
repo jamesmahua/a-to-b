@@ -21,6 +21,7 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
+  writeBatch,
   serverTimestamp,
   Timestamp,
   type Firestore,
@@ -483,6 +484,58 @@ describe('drivers', () => {
     await seed(async (db) => setDoc(doc(db, 'drivers/driver'), driverDoc({ approval: 'approved', activeOrderId: 'order1' })))
     await assertSucceeds(updateDoc(doc(as('driver'), 'drivers/driver'), { activeOrderId: null, availability: 'available' }))
     await assertFails(updateDoc(doc(as('driver'), 'drivers/driver'), { activeOrderId: 'order9' }))
+  })
+
+  it('approved driver: goes offline and back online, but can’t mark themselves on a job', async () => {
+    await seed(async (db) => setDoc(doc(db, 'drivers/driver'), driverDoc({ approval: 'approved', availability: 'available' })))
+    await assertSucceeds(updateDoc(doc(as('driver'), 'drivers/driver'), { availability: 'offline', updatedAt: serverTimestamp() }))
+    await assertSucceeds(updateDoc(doc(as('driver'), 'drivers/driver'), { availability: 'available', updatedAt: serverTimestamp() }))
+    await assertFails(updateDoc(doc(as('driver'), 'drivers/driver'), { availability: 'on_delivery' }))
+  })
+
+  it('a driver who isn’t approved can’t go online', async () => {
+    await seed(async (db) => setDoc(doc(db, 'drivers/driver'), driverDoc({ approval: 'suspended' })))
+    await assertFails(updateDoc(doc(as('driver'), 'drivers/driver'), { availability: 'available' }))
+  })
+
+  // markOrderDelivered(): the order and the driver doc change in one batch.
+  it('assigned driver: delivers and frees themselves in one batch', async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'drivers/driver'), driverDoc({ approval: 'approved', availability: 'on_delivery', activeOrderId: 'order1' }))
+      await setDoc(doc(db, 'orders/order1'), baseOrder({ status: 'out_for_delivery', driverUid: 'driver' }))
+    })
+    const db = as('driver')
+    const batch = writeBatch(db)
+    batch.update(doc(db, 'orders/order1'), {
+      status: 'delivered',
+      'timestamps.deliveredAt': serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+    batch.update(doc(db, 'drivers/driver'), { activeOrderId: null, availability: 'available', updatedAt: serverTimestamp() })
+    await assertSucceeds(batch.commit())
+  })
+
+  it('the batch fails as a whole if the order isn’t theirs any more', async () => {
+    await seed(async (db) => {
+      await setDoc(doc(db, 'drivers/driver'), driverDoc({ approval: 'approved', availability: 'on_delivery', activeOrderId: 'order1' }))
+      await setDoc(doc(db, 'orders/order1'), baseOrder({ status: 'out_for_delivery', driverUid: 'otherDriver' }))
+    })
+    const db = as('driver')
+    const batch = writeBatch(db)
+    batch.update(doc(db, 'orders/order1'), {
+      status: 'delivered',
+      'timestamps.deliveredAt': serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+    batch.update(doc(db, 'drivers/driver'), { activeOrderId: null, availability: 'available', updatedAt: serverTimestamp() })
+    await assertFails(batch.commit())
+  })
+
+  it('driver lists their own jobs, not anyone else’s', async () => {
+    await seed(async (db) => setDoc(doc(db, 'orders/order1'), baseOrder({ status: 'ready', driverUid: 'driver' })))
+    const mine = (db: Firestore, uid: string) => query(collection(db, 'orders'), where('driverUid', '==', uid))
+    await assertSucceeds(getDocs(mine(as('driver'), 'driver')))
+    await assertFails(getDocs(mine(as('driver'), 'otherDriver')))
   })
 
   it('super admin lists approved drivers (dispatch); drivers can’t list each other', async () => {
